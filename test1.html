@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Membrana con Indicador de Proximidad</title>
+    <title>Membrane with Proximity Indicator</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #020406; font-family: sans-serif; }
         #ui-overlay { position: absolute; bottom: 20px; left: 20px; display: flex; gap: 10px; z-index: 10; }
@@ -12,9 +12,9 @@
 </head>
 <body>
     <div id="ui-overlay">
-        <button id="view-p">Perspectiva</button>
-        <button id="view-f">Frontal</button>
-        <button id="view-l">Lateral</button>
+        <button id="view-p">Perspective</button>
+        <button id="view-f">Front</button>
+        <button id="view-l">Side</button>
     </div>
 
     <script type="importmap">
@@ -32,40 +32,40 @@
 
         const params = {
             spacing: 1.7,
-            stiffness: 0.18,     
-            elasticity: 0.08,    
-            drag: 0.93,          
+            stiffness: 0.18,
+            elasticity: 0.08,
+            drag: 0.93,
             layerGap: 2.5,
-            segments: 4,         
+            segments: 4,
             boneLength: 0.6,
-            gravity: 0.04,       
-            mouseForce: 1.2,     
-            mouseRadius: 4.5,    // El aro visual usará este valor
+            gravity: 0.04,
+            mouseForce: 1.2,
+            mouseRadius: 4.5,    // The visual ring uses this value
             reset: () => init()
         };
 
-        const SIZE = 18; 
+        const SIZE = 18;
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        // --- INDICADOR VISUAL DEL RATÓN ---
+        // --- MOUSE VISUAL INDICATOR ---
         const ringGeo = new THREE.TorusGeometry(params.mouseRadius, 0.05, 16, 100);
         const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.3 });
         const mouseRing = new THREE.Mesh(ringGeo, ringMat);
-        mouseRing.rotation.x = Math.PI / 2; // Plano horizontal
+        mouseRing.rotation.x = Math.PI / 2; // Horizontal plane
         scene.add(mouseRing);
 
         const gui = new GUI();
-        gui.add(params, 'mouseForce', 0, 5.0).name('Fuerza Ratón');
-        gui.add(params, 'mouseRadius', 1.0, 10.0).name('Radio Ratón').onChange(v => {
+        gui.add(params, 'mouseForce', 0, 5.0).name('Mouse Force');
+        gui.add(params, 'mouseRadius', 1.0, 10.0).name('Mouse Radius').onChange(v => {
             mouseRing.scale.set(v/params.mouseRadius, v/params.mouseRadius, 1);
         });
-        gui.add(params, 'stiffness', 0.01, 0.5).name('Tensión Vertical');
-        gui.add(params, 'elasticity', 0, 0.2).name('Tensión Lateral');
-        gui.add(params, 'reset').name('REINICIAR');
+        gui.add(params, 'stiffness', 0.01, 0.5).name('Vertical Stiffness');
+        gui.add(params, 'elasticity', 0, 0.2).name('Lateral Stiffness');
+        gui.add(params, 'reset').name('RESET');
 
         let headMesh, tailMesh;
         let lipids = [];
@@ -75,10 +75,10 @@
             const headGeo = new THREE.SphereGeometry(0.4, 12, 8);
             headMesh = new THREE.InstancedMesh(headGeo, new THREE.MeshPhongMaterial({color: 0x00ffcc}), SIZE * SIZE * 2);
             const tailGeo = new THREE.CylinderGeometry(0.07, 0.04, 1, 6);
-            tailGeo.rotateX(Math.PI / 2); 
+            tailGeo.rotateX(Math.PI / 2);
             tailMesh = new THREE.InstancedMesh(tailGeo, new THREE.MeshPhongMaterial({color: 0x777777}), SIZE * SIZE * 2 * 6);
             scene.add(headMesh, tailMesh);
-            
+
             lipids = [];
             for (let layer = 0; layer < 2; layer++) {
                 const isTop = (layer === 0);
@@ -115,8 +115,8 @@
             raycaster.setFromCamera(mouse, camera);
             const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
             raycaster.ray.intersectPlane(plane, mouseWorld);
-            
-            // Actualizar posición del indicador visual
+
+            // Update visual indicator position
             mouseRing.position.copy(mouseWorld);
 
             lipids.forEach(lipid => {
@@ -125,7 +125,7 @@
                 head.acc.y += (targetY - head.pos.y) * params.stiffness;
                 head.acc.x += (head.origin.x - head.pos.x) * params.elasticity;
                 head.acc.z += (head.origin.z - head.pos.z) * params.elasticity;
-                
+
                 const dist = head.pos.distanceTo(mouseWorld);
                 if(dist < params.mouseRadius) {
                     const force = new THREE.Vector3().subVectors(head.pos, mouseWorld).normalize();
@@ -141,13 +141,13 @@
                     p.acc.set(0, 0, 0);
                 });
 
-                for(let n = 0; n < 4; n++) { 
+                for(let n = 0; n < 4; n++) {
                     for(let s = 0; s < lipid.points.length - 1; s++) {
                         const p1 = lipid.points[s], p2 = lipid.points[s+1];
                         const diff = new THREE.Vector3().subVectors(p2.pos, p1.pos);
                         const error = (diff.length() - params.boneLength) / diff.length();
                         const correction = diff.multiplyScalar(error * 0.5);
-                        if(s === 0) p2.pos.sub(correction.multiplyScalar(1.8)); 
+                        if(s === 0) p2.pos.sub(correction.multiplyScalar(1.8));
                         else { p1.pos.add(correction); p2.pos.sub(correction); }
                     }
                 }
@@ -168,7 +168,7 @@
                     const p1 = l.points[s].pos, p2 = l.points[s+1].pos;
                     dummy.position.copy(p1).add(p2).multiplyScalar(0.5);
                     dummy.lookAt(p2);
-                    dummy.scale.set(1, 1, p1.distanceTo(p2)); 
+                    dummy.scale.set(1, 1, p1.distanceTo(p2));
                     dummy.updateMatrix();
                     tailMesh.setMatrixAt(tailIdx++, dummy.matrix);
                 }

@@ -2,15 +2,15 @@
 
 Interactive physics-based simulation of biological lipid membranes, built with [Three.js](https://threejs.org/).
 
-## Live Demos
+## Demos
 
 | File | Description |
 |------|-------------|
 | [bylayer.html](bylayer.html) | Full bilayer membrane with multi-species lipids, transmembrane proteins, cholesterol, and glycoproteins |
 | [monolayer.html](monolayer.html) | Single-layer membrane simulation |
 | [spherical.html](spherical.html) | Spherical membrane / vesicle simulation |
-| [index1.html](index1.html) | Basic single-species bilayer |
-| [index2.html](index2.html) | Multi-species editor with live GUI |
+| [test1.html](test1.html) | Basic bilayer with proximity indicator |
+| [test2.html](test2.html) | Multi-species membrane editor with live GUI |
 
 ## Features
 

@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Membrana Multiespecie: Dinámica de Lípidos</title>
+    <title>Multi-Species Membrane: Lipid Dynamics</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #020406; font-family: sans-serif; }
         #ui-overlay { position: absolute; bottom: 20px; left: 20px; display: flex; gap: 10px; z-index: 10; }
@@ -12,9 +12,9 @@
 </head>
 <body>
     <div id="ui-overlay">
-        <button id="view-p">Perspectiva</button>
-        <button id="view-f">Frontal</button>
-        <button id="view-l">Lateral</button>
+        <button id="view-p">Perspective</button>
+        <button id="view-f">Front</button>
+        <button id="view-l">Side</button>
     </div>
 
     <script type="importmap">
@@ -30,14 +30,14 @@
         import * as THREE from 'three';
         import { GUI } from 'lil-gui';
 
-        // --- DEFINICIÓN DE ESPECIES ---
+        // --- SPECIES DEFINITION ---
         const species = {
-            'Lípido A (Cian)': { color: 0x00ffcc, stiffness: 0.18, elasticity: 0.08, boneLength: 0.6, gravity: 0.04 },
-            'Lípido B (Magenta)': { color: 0xff00ff, stiffness: 0.05, elasticity: 0.02, boneLength: 0.9, gravity: 0.02 },
-            'Lípido C (Amarillo)': { color: 0xffff00, stiffness: 0.40, elasticity: 0.15, boneLength: 0.3, gravity: 0.08 }
+            'Lipid A (Cyan)': { color: 0x00ffcc, stiffness: 0.18, elasticity: 0.08, boneLength: 0.6, gravity: 0.04 },
+            'Lipid B (Magenta)': { color: 0xff00ff, stiffness: 0.05, elasticity: 0.02, boneLength: 0.9, gravity: 0.02 },
+            'Lipid C (Yellow)': { color: 0xffff00, stiffness: 0.40, elasticity: 0.15, boneLength: 0.3, gravity: 0.08 }
         };
 
-        let currentType = 'Lípido A (Cian)';
+        let currentType = 'Lipid A (Cyan)';
 
         const params = {
             spacing: 1.7,
@@ -56,7 +56,7 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        // --- INDICADOR VISUAL ---
+        // --- VISUAL INDICATOR ---
         const mouseRing = new THREE.Mesh(
             new THREE.TorusGeometry(params.mouseRadius, 0.05, 16, 100),
             new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3 })
@@ -67,12 +67,12 @@
         // --- UI ---
         const gui = new GUI();
         const fGlobal = gui.addFolder('Global');
-        fGlobal.add(params, 'mouseForce', 0, 5).name('Fuerza Ratón');
-        fGlobal.add(params, 'mouseRadius', 1, 10).name('Radio Ratón').onChange(v => mouseRing.scale.setScalar(v/4.5));
-        fGlobal.add(params, 'reset').name('REINICIAR');
+        fGlobal.add(params, 'mouseForce', 0, 5).name('Mouse Force');
+        fGlobal.add(params, 'mouseRadius', 1, 10).name('Mouse Radius').onChange(v => mouseRing.scale.setScalar(v/4.5));
+        fGlobal.add(params, 'reset').name('RESET');
 
-        const fSpecies = gui.addFolder('Editor de Especies');
-        fSpecies.add({ type: currentType }, 'type', Object.keys(species)).name('Seleccionar Lípido').onChange(v => {
+        const fSpecies = gui.addFolder('Species Editor');
+        fSpecies.add({ type: currentType }, 'type', Object.keys(species)).name('Select Lipid').onChange(v => {
             currentType = v;
             refreshSpeciesUI();
         });
@@ -82,22 +82,22 @@
             speciesControllers.forEach(c => c.destroy());
             speciesControllers = [];
             const s = species[currentType];
-            speciesControllers.push(fSpecies.add(s, 'stiffness', 0.01, 0.5).name('Tensión Vert'));
-            speciesControllers.push(fSpecies.add(s, 'elasticity', 0, 0.3).name('Tensión Lat'));
-            speciesControllers.push(fSpecies.add(s, 'boneLength', 0.1, 1.5).name('Largo Cola'));
-            speciesControllers.push(fSpecies.add(s, 'gravity', 0, 0.2).name('Gravedad'));
+            speciesControllers.push(fSpecies.add(s, 'stiffness', 0.01, 0.5).name('Vert. Stiffness'));
+            speciesControllers.push(fSpecies.add(s, 'elasticity', 0, 0.3).name('Lat. Elasticity'));
+            speciesControllers.push(fSpecies.add(s, 'boneLength', 0.1, 1.5).name('Tail Length'));
+            speciesControllers.push(fSpecies.add(s, 'gravity', 0, 0.2).name('Gravity'));
         }
         refreshSpeciesUI();
 
-        // --- MALLAS E INSTANCIAS ---
+        // --- MESHES AND INSTANCES ---
         let headMeshes = {}, tailMeshes = {};
         let lipids = [];
 
         function init() {
             lipids.forEach(l => { scene.remove(l.hMesh); scene.remove(l.tMesh); });
             lipids = [];
-            
-            // Limpiar mallas anteriores
+
+            // Clear previous meshes
             Object.values(headMeshes).forEach(m => scene.remove(m));
             Object.values(tailMeshes).forEach(m => scene.remove(m));
             headMeshes = {}; tailMeshes = {};
@@ -105,9 +105,9 @@
             const headGeo = new THREE.SphereGeometry(0.4, 12, 8);
             const tailGeo = new THREE.CylinderGeometry(0.07, 0.04, 1, 6).rotateX(Math.PI / 2);
 
-            // Crear una malla instanciada por cada especie
+            // Create one instanced mesh per species
             Object.keys(species).forEach(key => {
-                const count = (SIZE * SIZE * 2); 
+                const count = (SIZE * SIZE * 2);
                 headMeshes[key] = new THREE.InstancedMesh(headGeo, new THREE.MeshPhongMaterial({color: species[key].color}), count);
                 tailMeshes[key] = new THREE.InstancedMesh(tailGeo, new THREE.MeshPhongMaterial({color: 0x777777}), count * 6);
                 scene.add(headMeshes[key], tailMeshes[key]);
@@ -118,10 +118,10 @@
                 const isTop = (layer === 0);
                 for (let i = 0; i < SIZE; i++) {
                     for (let j = 0; j < SIZE; j++) {
-                        // Asignar especie aleatoria
+                        // Assign random species
                         const type = keys[Math.floor(Math.random() * keys.length)];
                         const sParams = species[type];
-                        
+
                         const x = (i - SIZE/2) * params.spacing;
                         const z = (j - SIZE/2) * params.spacing;
                         const y = isTop ? params.layerGap : -params.layerGap;
@@ -159,13 +159,13 @@
             lipids.forEach(l => {
                 const s = species[l.type];
                 const head = l.points[0];
-                
-                // Dinámica basada en su propia especie
+
+                // Dynamics based on its own species
                 const targetY = l.isTop ? params.layerGap : -params.layerGap;
                 head.acc.y += (targetY - head.pos.y) * s.stiffness;
                 head.acc.x += (head.origin.x - head.pos.x) * s.elasticity;
                 head.acc.z += (head.origin.z - head.pos.z) * s.elasticity;
-                
+
                 const dist = head.pos.distanceTo(mouseWorld);
                 if(dist < params.mouseRadius) {
                     const force = new THREE.Vector3().subVectors(head.pos, mouseWorld).normalize();
@@ -201,7 +201,7 @@
             lipids.forEach((l) => {
                 const hMesh = headMeshes[l.type];
                 const tMesh = tailMeshes[l.type];
-                
+
                 dummy.position.copy(l.points[0].pos);
                 dummy.rotation.set(0,0,0);
                 dummy.scale.setScalar(1);
