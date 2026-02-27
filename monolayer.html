@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Membrana Monocapa</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #020406; font-family: sans-serif; }
+
+        /* UI de Botones */
+        #ui-overlay { position: absolute; bottom: 20px; left: 20px; display: flex; gap: 10px; z-index: 10; }
+        button { padding: 10px 18px; cursor: pointer; background: #111; color: #00ffcc; border: 1px solid #00ffcc; border-radius: 4px; font-weight: bold; }
+        button:hover { background: #00ffcc; color: black; }
+
+        /* UI de Estadísticas */
+        #stats-panel {
+            position: absolute; top: 20px; right: 20px; background: rgba(0,0,0,0.85);
+            padding: 15px; border-radius: 8px; border: 1px solid #444; color: white; width: 200px; pointer-events: none;
+        }
+        .bar-container { width: 100%; background: #222; height: 10px; margin: 5px 0 10px 0; }
+        .bar { height: 100%; transition: width 0.1s; }
+    </style>
+</head>
+<body>
+    <div id="ui-overlay">
+        <button id="view-p">Perspectiva</button>
+        <button id="view-f">Frontal</button>
+        <button id="view-l">Lateral</button>
+    </div>
+
+    <div id="stats-panel">
+        <div style="font-size: 11px; color: #aaa; margin-bottom: 8px;">ENERGÍA CINÉTICA (TIEMPO REAL)</div>
+        <div id="stats-content"></div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "lil-gui": "https://cdn.jsdelivr.net/npm/lil-gui@0.19/+esm"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GUI } from 'lil-gui';
+
+        // --- DEFINICIÓN DE ESPECIES ---
+        const species = {
+            'Lípido A (Cian)': { color: 0x00ffcc, stiffness: 0.18, elasticity: 0.08, boneLength: 0.6, gravity: 0.04, energy: 0 },
+            'Lípido B (Magenta)': { color: 0xff00ff, stiffness: 0.05, elasticity: 0.02, boneLength: 0.9, gravity: 0.02, energy: 0 },
+            'Lípido C (Amarillo)': { color: 0xffff00, stiffness: 0.40, elasticity: 0.15, boneLength: 0.3, gravity: 0.08, energy: 0 }
+        };
+
+        let currentType = 'Lípido A (Cian)';
+
+        // Parámetros
+        const params = {
+            spacing: 0.95,
+            drag: 0.93,
+            segments: 4,
+            mouseForce: 0.1,
+            mouseRadius: 1.5,
+            temperature: 0.02,
+            attractionMode: false,
+            lipidRepulsion: 0.8,
+            reset: () => init()
+        };
+
+        const SIZE = 18;
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        // --- CONTROLES DE CÁMARA ---
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.enabled = true;
+
+        // --- INDICADORES VISUALES ---
+        const mouseRing = new THREE.Mesh(
+            new THREE.TorusGeometry(params.mouseRadius, 0.05, 16, 100),
+            new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3 })
+        );
+        mouseRing.rotation.x = Math.PI / 2;
+        mouseRing.visible = true;
+        scene.add(mouseRing);
+
+        // --- UI (LIL-GUI) ---
+        const gui = new GUI();
+        const fGlobal = gui.addFolder('Global');
+        fGlobal.add(params, 'temperature', 0, 0.3).name('Temperatura (K)');
+        fGlobal.add(params, 'mouseForce', 0, 5).name('Fuerza Ratón');
+        fGlobal.add(params, 'mouseRadius', 1, 10).name('Radio Ratón').onChange(v => mouseRing.scale.setScalar(v/4.5));
+        fGlobal.add(params, 'attractionMode').name('Modo Succión');
+        fGlobal.add(params, 'lipidRepulsion', 0, 2).name('Repulsión Lípidos');
+        fGlobal.add(params, 'reset').name('REINICIAR');
+
+        const fSpecies = gui.addFolder('Editor de Especies');
+        fSpecies.add({ type: currentType }, 'type', Object.keys(species)).name('Seleccionar Lípido').onChange(v => {
+            currentType = v;
+            refreshSpeciesUI();
+        });
+
+        let speciesControllers = [];
+        function refreshSpeciesUI() {
+            speciesControllers.forEach(c => c.destroy());
+            speciesControllers = [];
+            const s = species[currentType];
+            speciesControllers.push(fSpecies.add(s, 'stiffness', 0.01, 0.5).name('Tensión Vert'));
+            speciesControllers.push(fSpecies.add(s, 'elasticity', 0, 0.3).name('Tensión Lat'));
+            speciesControllers.push(fSpecies.add(s, 'boneLength', 0.1, 1.5).name('Largo Cola'));
+            speciesControllers.push(fSpecies.add(s, 'gravity', 0, 0.2).name('Gravedad'));
+        }
+        refreshSpeciesUI();
+
+        // --- MALLAS E INSTANCIAS ---
+        let headMeshes = {}, tailMeshes = {};
+        let lipids = [];
+
+        function init() {
+            lipids.forEach(l => { scene.remove(l.hMesh); scene.remove(l.tMesh); });
+            lipids = [];
+
+            Object.values(headMeshes).forEach(m => scene.remove(m));
+            Object.values(tailMeshes).forEach(m => scene.remove(m));
+            headMeshes = {}; tailMeshes = {};
+
+            // Geometrías
+            const headGeo = new THREE.SphereGeometry(0.4, 12, 8);
+            const tailGeo = new THREE.CylinderGeometry(0.07, 0.04, 1, 6).rotateX(Math.PI / 2);
+
+            Object.keys(species).forEach(key => {
+                const count = (SIZE * SIZE);
+                headMeshes[key] = new THREE.InstancedMesh(headGeo, new THREE.MeshPhongMaterial({color: species[key].color}), count);
+                headMeshes[key].castShadow = true;
+                headMeshes[key].receiveShadow = true;
+
+                tailMeshes[key] = new THREE.InstancedMesh(tailGeo, new THREE.MeshPhongMaterial({color: 0x777777}), count * (params.segments + 1));
+                tailMeshes[key].castShadow = true;
+                tailMeshes[key].receiveShadow = true;
+
+                scene.add(headMeshes[key], tailMeshes[key]);
+            });
+
+            const keys = Object.keys(species);
+            // Single layer only
+            for (let i = 0; i < SIZE; i++) {
+                for (let j = 0; j < SIZE; j++) {
+                    const type = keys[Math.floor(Math.random() * keys.length)];
+                    const sParams = species[type];
+
+                    const x = (i - SIZE/2) * params.spacing;
+                    const z = (j - SIZE/2) * params.spacing;
+                    const y = 0; // Heads at Y=0
+
+                    const lipid = { type, points: [], instanceIdx: i * SIZE + j };
+                    // All tails point downward
+                    for(let s = 0; s <= params.segments; s++) {
+                        const py = y - (s * sParams.boneLength); // Tails extend downward
+                        lipid.points.push({
+                            pos: new THREE.Vector3(x, py, z),
+                            old: new THREE.Vector3(x, py, z),
+                            origin: new THREE.Vector3(x, py, z),
+                            acc: new THREE.Vector3(0, 0, 0)
+                        });
+                    }
+                    lipids.push(lipid);
+                }
+            }
+            updateStatsDOM();
+        }
+
+        // --- UPDATE STATS DOM ---
+        function updateStatsDOM() {
+            const container = document.getElementById('stats-content');
+            container.innerHTML = '';
+            Object.keys(species).forEach(key => {
+                const div = document.createElement('div');
+                const colorHex = '#' + species[key].color.toString(16).padStart(6, '0');
+                div.innerHTML = `
+                    <div style="display:flex; justify-content:space-between;">
+                        <span style="color:${colorHex}; font-size:11px; font-weight:bold;">${key}</span>
+                    </div>
+                    <div class="bar-container">
+                        <div id="bar-${key.replace(/\s/g, '-')}" class="bar" style="background-color:${colorHex}; width: 0%"></div>
+                    </div>`;
+                container.appendChild(div);
+            });
+        }
+
+        const mouseWorld = new THREE.Vector3(0, 0, 0);
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        window.addEventListener('mousemove', (e) => {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        });
+
+        function physicsUpdate() {
+            raycaster.setFromCamera(mouse, camera);
+            const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+            raycaster.ray.intersectPlane(plane, mouseWorld);
+
+            // Actualizar anillo visual
+            mouseRing.position.copy(mouseWorld);
+            mouseRing.material.color.set(params.attractionMode ? 0xff4444 : 0xffffff);
+
+            // Resetear energía acumulada
+            Object.keys(species).forEach(k => species[k].energy = 0);
+
+            lipids.forEach((l, idx) => {
+                const s = species[l.type];
+                const head = l.points[0];
+
+                // 1. Vibración Térmica
+                if(params.temperature > 0) {
+                    head.acc.x += (Math.random() - 0.5) * params.temperature;
+                    head.acc.y += (Math.random() - 0.5) * params.temperature;
+                    head.acc.z += (Math.random() - 0.5) * params.temperature;
+                }
+
+                // 2. Dinámica de Resorte (cabezas en Y=0)
+                const targetY = 0;
+                head.acc.y += (targetY - head.pos.y) * s.stiffness;
+
+                head.acc.x += (head.origin.x - head.pos.x) * s.elasticity;
+                head.acc.z += (head.origin.z - head.pos.z) * s.elasticity;
+
+                // 3. Interacción Ratón
+                const dist = head.pos.distanceTo(mouseWorld);
+                if(dist < params.mouseRadius) {
+                    const dir = new THREE.Vector3().subVectors(head.pos, mouseWorld).normalize();
+                    const forceMag = (1 - dist/params.mouseRadius) * params.mouseForce;
+
+                    if (params.attractionMode) {
+                        head.acc.sub(dir.multiplyScalar(forceMag));
+                    } else {
+                        head.acc.add(dir.multiplyScalar(forceMag));
+                    }
+                }
+
+                // 4. Repulsión entre lípidos vecinos
+                if (params.lipidRepulsion > 0) {
+                    const checkRadius = 2.0;
+                    lipids.forEach((other, otherIdx) => {
+                        if (idx < otherIdx) {
+                            const otherHead = other.points[0].pos;
+                            const diff = new THREE.Vector3().subVectors(head.pos, otherHead);
+                            const distance = diff.length();
+
+                            if (distance < checkRadius) {
+                                const minDist = 0.82;
+
+                                if (distance < minDist && distance > 0.01) {
+                                    const repulsionForce = ((minDist - distance) / minDist) * params.lipidRepulsion;
+                                    const force = diff.normalize().multiplyScalar(repulsionForce);
+                                    head.acc.add(force);
+                                    other.points[0].acc.sub(force);
+                                }
+                            }
+                        }
+                    });
+                }
+
+                // 5. Integración Verlet + Cálculo de Energía
+                l.points.forEach((p, idx) => {
+                    if(idx > 0) p.acc.y += -s.gravity; // Gravity pulls downward
+
+                    const vel = new THREE.Vector3().subVectors(p.pos, p.old);
+
+                    // Sumar energía cinética para las estadísticas
+                    s.energy += vel.length();
+
+                    vel.multiplyScalar(params.drag);
+                    p.old.copy(p.pos);
+                    p.pos.add(vel).add(p.acc);
+                    p.acc.set(0, 0, 0);
+                });
+
+                // 6. Restricciones de Cola
+                for(let n = 0; n < 3; n++) {
+                    for(let i = 0; i < l.points.length - 1; i++) {
+                        const p1 = l.points[i], p2 = l.points[i+1];
+                        const diff = new THREE.Vector3().subVectors(p2.pos, p1.pos);
+                        const currentLen = diff.length();
+                        const err = (currentLen - s.boneLength) / currentLen;
+                        const corr = diff.multiplyScalar(err * 0.5);
+
+                        if(i === 0) p2.pos.sub(corr.multiplyScalar(1.8)); // Cabeza fija, cola se mueve más
+                        else { p1.pos.add(corr); p2.pos.sub(corr); }
+                    }
+                }
+            });
+
+            // Actualizar Barras de UI
+            Object.keys(species).forEach(k => {
+                const barId = `bar-${k.replace(/\s/g, '-')}`;
+                const el = document.getElementById(barId);
+                if(el) {
+                    const width = Math.min(species[k].energy * 0.5, 100);
+                    el.style.width = width + '%';
+                }
+            });
+        }
+
+        const dummy = new THREE.Object3D();
+        const tailCounters = {};
+
+        function render() {
+            physicsUpdate();
+            controls.update();
+
+            Object.keys(species).forEach(k => tailCounters[k] = 0);
+
+            lipids.forEach((l) => {
+                const hMesh = headMeshes[l.type];
+                const tMesh = tailMeshes[l.type];
+
+                // Render Cabeza
+                dummy.position.copy(l.points[0].pos);
+                dummy.rotation.set(0,0,0);
+                dummy.scale.setScalar(1);
+                dummy.updateMatrix();
+                hMesh.setMatrixAt(l.instanceIdx, dummy.matrix);
+
+                // Render Cola
+                for(let s = 0; s < params.segments; s++) {
+                    const p1 = l.points[s].pos, p2 = l.points[s+1].pos;
+                    dummy.position.copy(p1).add(p2).multiplyScalar(0.5);
+                    dummy.lookAt(p2);
+                    dummy.scale.set(1, 1, p1.distanceTo(p2));
+                    dummy.updateMatrix();
+                    tMesh.setMatrixAt(tailCounters[l.type]++, dummy.matrix);
+                }
+            });
+
+            Object.keys(species).forEach(k => {
+                headMeshes[k].instanceMatrix.needsUpdate = true;
+                tailMeshes[k].instanceMatrix.needsUpdate = true;
+            });
+
+            renderer.render(scene, camera);
+            requestAnimationFrame(render);
+        }
+
+        // --- ILUMINACIÓN Y SOMBRAS ---
+        scene.add(new THREE.AmbientLight(0x444444, 1.0));
+
+        const light = new THREE.DirectionalLight(0xffffff, 2.5);
+        light.position.set(10, 20, 10);
+        light.castShadow = true;
+
+        light.shadow.mapSize.width = 2048;
+        light.shadow.mapSize.height = 2048;
+        light.shadow.camera.near = 0.5;
+        light.shadow.camera.far = 50;
+        light.shadow.camera.left = -25;
+        light.shadow.camera.right = 25;
+        light.shadow.camera.top = 25;
+        light.shadow.camera.bottom = -25;
+        light.shadow.bias = -0.0001;
+
+        scene.add(light);
+
+        // Plano de fondo para recibir sombras
+        const planeGeo = new THREE.PlaneGeometry(60, 60);
+        const planeMat = new THREE.ShadowMaterial({ opacity: 0.3 });
+        const groundPlane = new THREE.Mesh(planeGeo, planeMat);
+        groundPlane.rotation.x = -Math.PI / 2;
+        groundPlane.position.y = -5;
+        groundPlane.receiveShadow = true;
+        scene.add(groundPlane);
+
+        // Funciones de Cámara
+        const setCam = (x,y,z) => {
+            camera.position.set(x,y,z);
+            controls.target.set(0,0,0);
+            controls.update();
+        };
+        document.getElementById('view-p').onclick = () => setCam(22, 18, 22);
+        document.getElementById('view-f').onclick = () => setCam(0, 0, 40);
+        document.getElementById('view-l').onclick = () => setCam(40, 0, 0);
+
+        init();
+        setCam(22, 18, 22);
+        render();
+    </script>
+</body>
+</html>

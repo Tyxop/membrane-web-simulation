@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Membrana con Indicador de Proximidad</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #020406; font-family: sans-serif; }
+        #ui-overlay { position: absolute; bottom: 20px; left: 20px; display: flex; gap: 10px; z-index: 10; }
+        button { padding: 10px 18px; cursor: pointer; background: #111; color: #00ffcc; border: 1px solid #00ffcc; border-radius: 4px; font-weight: bold; }
+        button:hover { background: #00ffcc; color: black; }
+    </style>
+</head>
+<body>
+    <div id="ui-overlay">
+        <button id="view-p">Perspectiva</button>
+        <button id="view-f">Frontal</button>
+        <button id="view-l">Lateral</button>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "lil-gui": "https://cdn.jsdelivr.net/npm/lil-gui@0.19/+esm"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GUI } from 'lil-gui';
+
+        const params = {
+            spacing: 1.7,
+            stiffness: 0.18,     
+            elasticity: 0.08,    
+            drag: 0.93,          
+            layerGap: 2.5,
+            segments: 4,         
+            boneLength: 0.6,
+            gravity: 0.04,       
+            mouseForce: 1.2,     
+            mouseRadius: 4.5,    // El aro visual usará este valor
+            reset: () => init()
+        };
+
+        const SIZE = 18; 
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // --- INDICADOR VISUAL DEL RATÓN ---
+        const ringGeo = new THREE.TorusGeometry(params.mouseRadius, 0.05, 16, 100);
+        const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.3 });
+        const mouseRing = new THREE.Mesh(ringGeo, ringMat);
+        mouseRing.rotation.x = Math.PI / 2; // Plano horizontal
+        scene.add(mouseRing);
+
+        const gui = new GUI();
+        gui.add(params, 'mouseForce', 0, 5.0).name('Fuerza Ratón');
+        gui.add(params, 'mouseRadius', 1.0, 10.0).name('Radio Ratón').onChange(v => {
+            mouseRing.scale.set(v/params.mouseRadius, v/params.mouseRadius, 1);
+        });
+        gui.add(params, 'stiffness', 0.01, 0.5).name('Tensión Vertical');
+        gui.add(params, 'elasticity', 0, 0.2).name('Tensión Lateral');
+        gui.add(params, 'reset').name('REINICIAR');
+
+        let headMesh, tailMesh;
+        let lipids = [];
+
+        function init() {
+            if(headMesh) { scene.remove(headMesh); scene.remove(tailMesh); }
+            const headGeo = new THREE.SphereGeometry(0.4, 12, 8);
+            headMesh = new THREE.InstancedMesh(headGeo, new THREE.MeshPhongMaterial({color: 0x00ffcc}), SIZE * SIZE * 2);
+            const tailGeo = new THREE.CylinderGeometry(0.07, 0.04, 1, 6);
+            tailGeo.rotateX(Math.PI / 2); 
+            tailMesh = new THREE.InstancedMesh(tailGeo, new THREE.MeshPhongMaterial({color: 0x777777}), SIZE * SIZE * 2 * 6);
+            scene.add(headMesh, tailMesh);
+            
+            lipids = [];
+            for (let layer = 0; layer < 2; layer++) {
+                const isTop = (layer === 0);
+                for (let i = 0; i < SIZE; i++) {
+                    for (let j = 0; j < SIZE; j++) {
+                        const x = (i - SIZE/2) * params.spacing;
+                        const z = (j - SIZE/2) * params.spacing;
+                        const y = isTop ? params.layerGap : -params.layerGap;
+                        const lipid = { isTop, points: [] };
+                        for(let s = 0; s <= params.segments; s++) {
+                            const py = isTop ? y - (s * params.boneLength) : y + (s * params.boneLength);
+                            lipid.points.push({
+                                pos: new THREE.Vector3(x, py, z),
+                                old: new THREE.Vector3(x, py, z),
+                                origin: new THREE.Vector3(x, py, z),
+                                acc: new THREE.Vector3(0, 0, 0)
+                            });
+                        }
+                        lipids.push(lipid);
+                    }
+                }
+            }
+        }
+
+        const mouseWorld = new THREE.Vector3(0, 0, 0);
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        window.addEventListener('mousemove', (e) => {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        });
+
+        function physicsUpdate() {
+            raycaster.setFromCamera(mouse, camera);
+            const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+            raycaster.ray.intersectPlane(plane, mouseWorld);
+            
+            // Actualizar posición del indicador visual
+            mouseRing.position.copy(mouseWorld);
+
+            lipids.forEach(lipid => {
+                const head = lipid.points[0];
+                const targetY = lipid.isTop ? params.layerGap : -params.layerGap;
+                head.acc.y += (targetY - head.pos.y) * params.stiffness;
+                head.acc.x += (head.origin.x - head.pos.x) * params.elasticity;
+                head.acc.z += (head.origin.z - head.pos.z) * params.elasticity;
+                
+                const dist = head.pos.distanceTo(mouseWorld);
+                if(dist < params.mouseRadius) {
+                    const force = new THREE.Vector3().subVectors(head.pos, mouseWorld).normalize();
+                    const strength = (1 - dist / params.mouseRadius) * params.mouseForce;
+                    head.acc.add(force.multiplyScalar(strength));
+                }
+
+                lipid.points.forEach((p, idx) => {
+                    if(idx > 0) p.acc.y += params.gravity * (lipid.isTop ? -1 : 1);
+                    const vel = new THREE.Vector3().subVectors(p.pos, p.old).multiplyScalar(params.drag);
+                    p.old.copy(p.pos);
+                    p.pos.add(vel).add(p.acc);
+                    p.acc.set(0, 0, 0);
+                });
+
+                for(let n = 0; n < 4; n++) { 
+                    for(let s = 0; s < lipid.points.length - 1; s++) {
+                        const p1 = lipid.points[s], p2 = lipid.points[s+1];
+                        const diff = new THREE.Vector3().subVectors(p2.pos, p1.pos);
+                        const error = (diff.length() - params.boneLength) / diff.length();
+                        const correction = diff.multiplyScalar(error * 0.5);
+                        if(s === 0) p2.pos.sub(correction.multiplyScalar(1.8)); 
+                        else { p1.pos.add(correction); p2.pos.sub(correction); }
+                    }
+                }
+            });
+        }
+
+        function render() {
+            physicsUpdate();
+            const dummy = new THREE.Object3D();
+            let tailIdx = 0;
+            lipids.forEach((l, i) => {
+                dummy.position.copy(l.points[0].pos);
+                dummy.rotation.set(0,0,0);
+                dummy.scale.set(1,1,1);
+                dummy.updateMatrix();
+                headMesh.setMatrixAt(i, dummy.matrix);
+                for(let s = 0; s < params.segments; s++) {
+                    const p1 = l.points[s].pos, p2 = l.points[s+1].pos;
+                    dummy.position.copy(p1).add(p2).multiplyScalar(0.5);
+                    dummy.lookAt(p2);
+                    dummy.scale.set(1, 1, p1.distanceTo(p2)); 
+                    dummy.updateMatrix();
+                    tailMesh.setMatrixAt(tailIdx++, dummy.matrix);
+                }
+            });
+            headMesh.instanceMatrix.needsUpdate = true;
+            tailMesh.instanceMatrix.needsUpdate = true;
+            renderer.render(scene, camera);
+            requestAnimationFrame(render);
+        }
+
+        scene.add(new THREE.AmbientLight(0x444444));
+        const light = new THREE.DirectionalLight(0xffffff, 2);
+        light.position.set(10, 20, 10);
+        scene.add(light);
+
+        const setCam = (x,y,z) => { camera.position.set(x,y,z); camera.lookAt(0,0,0); };
+        document.getElementById('view-p').onclick = () => setCam(22, 18, 22);
+        document.getElementById('view-f').onclick = () => setCam(0, 0, 40);
+        document.getElementById('view-l').onclick = () => setCam(40, 0, 0);
+
+        init();
+        setCam(22, 18, 22);
+        render();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
